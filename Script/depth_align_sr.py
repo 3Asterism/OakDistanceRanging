@@ -343,8 +343,6 @@ def run():
         cv2.namedWindow(depthWindowName)
 
         # 设置鼠标点击回调函数，用于ROI选择
-        cv2.setMouseCallback(rgbWindowName, click_and_crop)
-        cv2.setMouseCallback(depthWindowName, click_and_crop)
 
         print("使用WASD键移动ROI!")
 
@@ -396,16 +394,19 @@ def run():
                 draw_rect(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), bboxColors[detection.label], 1)
                 # 如果检测结果包含空间坐标，绘制X, Y, Z坐标
                 if hasattr(detection, "spatialCoordinates"):
+                    print(f"X: {int(detection.spatialCoordinates.x)} mm")
                     draw_text(
                         frame,
                         f"X: {int(detection.spatialCoordinates.x)} mm",  # X坐标
                         (bbox[0] + 10, bbox[1] + 50),
                     )
+                    print(f"Y: {int(detection.spatialCoordinates.y)} mm")
                     draw_text(
                         frame,
                         f"Y: {int(detection.spatialCoordinates.y)} mm",  # Y坐标
                         (bbox[0] + 10, bbox[1] + 65),
                     )
+                    print(f"Z: {int(detection.spatialCoordinates.z)} mm")
                     draw_text(
                         frame,
                         f"Z: {int(detection.spatialCoordinates.z)} mm",  # Z坐标
@@ -513,12 +514,12 @@ def run():
                     new_config = True
             # 调整大小
             elif key == ord("z"):
-                if bottom_right.x + step_size <= 1:
+                if bottom_right.y - step_size >= 0 and bottom_right.x - step_size >= 0:
                     bottom_right.y -= step_size
                     bottom_right.x -= step_size
                     new_config = True
             elif key == ord("x"):
-                if bottom_right.x + step_size <= 1:
+                if bottom_right.x + step_size <= 1 and bottom_right.y + step_size <= 1:
                     bottom_right.y += step_size
                     bottom_right.x += step_size
                     new_config = True

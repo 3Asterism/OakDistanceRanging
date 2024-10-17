@@ -1,142 +1,243 @@
-#!/usr/bin/env python3
+from __future__ import annotations
 
-import concurrent.futures
-import math
-import pathlib
-import time
+from pathlib import Path
 
 import cv2
 import depthai as dai
+import numpy as np
 
-from calc import HostSpatialsCalc
-from utility import TextHelper
+lower_threshold = 0  # 最小深度阈值，单位为毫米
+upper_threshold = 100_000  # 最大深度阈值，单位为毫米
 
-# 将 pathlib.PosixPath 设置为 pathlib.WindowsPath 以解决 Windows 系统上的路径问题
-pathlib.PosixPath = pathlib.WindowsPath
+num_classes = 1  # 类别数量
+
+# 加载模型文件
+blob = Path(__file__).parent.joinpath("bestHead_openvino_2022.1_6shave.blob")
+model = dai.OpenVINO.Blob(blob)  # 创建OpenVINO模型对象
+dim = next(iter(model.networkInputs.values())).dims  # 获取输入维度
+W, H = dim[:2]  # 获取宽度和高度
+
+# 获取输出名称和张量
+output_name, output_tenser = next(iter(model.networkOutputs.items()))
+# 根据模型类型确定类别数量
+num_classes = output_tenser.dims[2] - 5 if "yolov6" in output_name else output_tenser.dims[2] // 3 - 5
+
+# 标签映射
+# fmt: off
+label_map = [
+    "head"
+]
+# fmt: on
+
+# 最小深度设置，视差范围加倍（从95到190）：
+extended_disparity = True
+# 更好地处理长距离的精度，分数视差32级：
+subpixel = True
+# 更好地处理遮挡：
+lr_check = True
+
+# 深度计算算法设置为平均
+calculation_algorithm = dai.SpatialLocationCalculatorAlgorithm.AVERAGE
+top_left = dai.Point2f(0.4, 0.4)  # 定义矩形计算区域的左上角
+bottom_right = dai.Point2f(0.6, 0.6)  # 定义矩形计算区域的右下角
+config = dai.SpatialLocationCalculatorConfigData()  # 创建空间位置计算配置对象
 
 
 def create_pipeline():
-    # 创建深度AI管道
+    global calculation_algorithm, config  # 声明全局变量
+
+    # 创建管道
     pipeline = dai.Pipeline()
 
-    # 定义左右单目相机
-    monoLeft = pipeline.create(dai.node.MonoCamera)
-    monoRight = pipeline.create(dai.node.MonoCamera)
-    stereo = pipeline.create(dai.node.StereoDepth)
+    # 定义源节点和输出节点
+    left = pipeline.create(dai.node.ColorCamera)  # 创建左摄像头
+    right = pipeline.create(dai.node.ColorCamera)  # 创建右摄像头
 
-    # 设置左右单目相机的分辨率和连接
-    monoLeft.setResolution(dai.MonoCameraProperties.SensorResolution.THE_800_P)
-    monoLeft.setBoardSocket(dai.CameraBoardSocket.LEFT)
+    manip = pipeline.create(dai.node.ImageManip)  # 创建图像处理节点
 
-    monoRight.setResolution(dai.MonoCameraProperties.SensorResolution.THE_800_P)
-    monoRight.setBoardSocket(dai.CameraBoardSocket.RIGHT)
+    stereo = pipeline.create(dai.node.StereoDepth)  # 创建立体深度节点
+    spatialLocationCalculator = pipeline.create(dai.node.SpatialLocationCalculator)  # 创建空间位置计算节点
 
-    stereo.initialConfig.setConfidenceThreshold(255)
-    stereo.setLeftRightCheck(True)
-    stereo.setSubpixel(False)
-    stereo.setDepthAlign(dai.CameraBoardSocket.LEFT)
+    spatialDetectionNetwork = pipeline.create(dai.node.YoloSpatialDetectionNetwork)  # 创建YOLO检测网络
 
-    # 将左右单目相机连接到立体相机
-    monoLeft.out.link(stereo.left)
-    monoRight.out.link(stereo.right)
+    imageOut = pipeline.create(dai.node.XLinkOut)  # 创建图像输出节点
+    disparityOut = pipeline.create(dai.node.XLinkOut)  # 创建视差输出节点
+    xoutNN = pipeline.create(dai.node.XLinkOut)  # 创建神经网络输出节点
 
-    # 创建深度输出
-    xoutDepth = pipeline.create(dai.node.XLinkOut)
-    xoutDepth.setStreamName("depth")
-    stereo.depth.link(xoutDepth.input)
+    xinSpatialCalcConfig = pipeline.create(dai.node.XLinkIn)  # 创建空间计算配置输入节点
 
-    # 创建左单目相机输出，用于YOLO推理
-    xoutMonoLeft = pipeline.create(dai.node.XLinkOut)
-    xoutMonoLeft.setStreamName("mono_left")
-    monoLeft.out.link(xoutMonoLeft.input)
+    # 设置输出流名称
+    imageOut.setStreamName("image")
+    disparityOut.setStreamName("disp")
+    xoutNN.setStreamName("detections")
+    xinSpatialCalcConfig.setStreamName("spatialCalcConfig")
 
-    return pipeline, stereo
+    # 摄像头属性设置
+    left.setResolution(dai.ColorCameraProperties.SensorResolution.THE_800_P)  # 设置分辨率
+    left.setFps(24)  # 设置帧率
+    left.setIspScale(1, 2)  # 设置ISP缩放
+    right.setResolution(dai.ColorCameraProperties.SensorResolution.THE_800_P)  # 设置分辨率
+    right.setFps(24)  # 设置帧率
+    right.setIspScale(1, 2)  # 设置ISP缩放
+
+    # 图像处理设置
+    manip.initialConfig.setResize(W, H)  # 设置调整大小
+    manip.initialConfig.setKeepAspectRatio(False)  # 不保持宽高比
+    manip.initialConfig.setFrameType(dai.ImgFrame.Type.BGR888p)  # 设置帧类型为BGR888p
+    right.video.link(manip.inputImage)  # 连接右摄像头与图像处理节点
+
+    # 设置摄像头的插槽
+    left.setBoardSocket(dai.CameraBoardSocket.CAM_B)  # 左摄像头
+    right.setBoardSocket(dai.CameraBoardSocket.CAM_C)  # 右摄像头
+
+    # 深度计算设置
+    stereo.setDefaultProfilePreset(dai.node.StereoDepth.PresetMode.HIGH_DENSITY)  # 设置预设模式
+    stereo.initialConfig.setMedianFilter(dai.MedianFilter.MEDIAN_OFF)  # 设置中值滤波
+    stereo.setLeftRightCheck(lr_check)  # 设置左右检查
+    stereo.setExtendedDisparity(extended_disparity)  # 设置扩展视差
+    stereo.setSubpixel(subpixel)  # 设置子像素
+    stereo.setOutputSize(right.getIspWidth(), right.getIspHeight())  # 设置输出大小
+    stereo.setDepthAlign(right.getBoardSocket())  # 设置深度对齐
+    print(f"Depth aligner: {right.getBoardSocket()}")  # 打印深度对齐信息
+
+    # 网络特定设置
+    spatialDetectionNetwork.setBlob(model)  # 设置YOLO模型
+    spatialDetectionNetwork.setConfidenceThreshold(0.5)  # 设置置信度阈值
+
+    # YOLO特定参数
+    spatialDetectionNetwork.setNumClasses(num_classes)  # 设置类别数量
+    spatialDetectionNetwork.setCoordinateSize(4)  # 设置坐标大小
+    spatialDetectionNetwork.setAnchors([])  # 设置锚点
+    spatialDetectionNetwork.setAnchorMasks({})  # 设置锚点掩膜
+    spatialDetectionNetwork.setIouThreshold(0.3)  # 设置IOU阈值
+
+    # 空间特定参数
+    spatialDetectionNetwork.setBoundingBoxScaleFactor(0.5)  # 设置边界框缩放因子
+    spatialDetectionNetwork.setDepthLowerThreshold(lower_threshold)  # 设置深度下阈值
+    spatialDetectionNetwork.setDepthUpperThreshold(upper_threshold)  # 设置深度上阈值
+    spatialDetectionNetwork.setSpatialCalculationAlgorithm(calculation_algorithm)  # 设置空间计算算法
+
+    # 配置设置
+    config = dai.SpatialLocationCalculatorConfigData()  # 创建配置数据对象
+    config.depthThresholds.lowerThreshold = lower_threshold  # 设置深度下阈值
+    config.depthThresholds.upperThreshold = upper_threshold  # 设置深度上阈值
+    config.calculationAlgorithm = calculation_algorithm  # 设置计算算法
+    config.roi = dai.Rect(top_left, bottom_right)  # 设置感兴趣区域
+
+    spatialLocationCalculator.inputConfig.setWaitForMessage(False)  # 设置不等待消息
+    spatialLocationCalculator.initialConfig.addROI(config)  # 添加感兴趣区域配置
+
+    # 链接各个节点
+    # right.isp.link(imageOut.input)  # 连接右摄像头的ISP与图像输出
+    stereo.syncedRight.link(imageOut.input)  # 连接同步右摄像头的深度输出与图像输出
+    manip.out.link(spatialDetectionNetwork.input)  # 连接图像处理输出与YOLO输入
+
+    left.isp.link(stereo.left)  # 连接左摄像头ISP与立体深度左输入
+    right.isp.link(stereo.right)  # 连接右摄像头ISP与立体深度右输入
+
+    stereo.disparity.link(disparityOut.input)  # 连接立体深度的视差输出与视差输出
+    stereo.depth.link(spatialDetectionNetwork.inputDepth)  # 连接深度输出与YOLO输入深度
+
+    spatialDetectionNetwork.passthroughDepth.link(spatialLocationCalculator.inputDepth)  # 连接YOLO深度输出与空间位置计算输入
+    spatialDetectionNetwork.out.link(xoutNN.input)  # 连接YOLO输出与神经网络输出
+
+    xinSpatialCalcConfig.out.link(spatialLocationCalculator.inputConfig)  # 连接输入配置与空间计算节点
+
+    return pipeline, stereo.initialConfig.getMaxDisparity()  # 返回管道和最大视差值
 
 
-def load_model(model_path):
-    from ultralytics import YOLO
-    model = YOLO(model_path)  # 加载 YOLOv8 模型
-    return model
+def check_input(roi, frame, DELTA=5):
+    """检查输入是否为ROI或点。如果是点，则转换为ROI"""
+    # 如果输入是列表，则转换为numpy数组
+    if isinstance(roi, list):
+        roi = np.array(roi)
+
+    # 限制点的范围，以免ROI超出帧范围
+    if roi.shape in {(2,), (2, 1)}:  # 如果是点
+        roi = np.hstack([roi, np.array([[-DELTA, -DELTA], [DELTA, DELTA]])])  # 扩展为ROI
+    elif roi.shape in {(4,), (4, 1)}:  # 如果是四个坐标
+        roi = np.array(roi)
+
+    # 将ROI限制在帧的范围内
+    roi.clip([DELTA, DELTA], [frame.shape[1] - DELTA, frame.shape[0] - DELTA])
+
+    return roi / frame.shape[1::-1]  # 返回归一化后的ROI
 
 
-class DepthAIApp:
-    def __init__(self, model_path, device_ip):
-        self.model = load_model(model_path)
-        self.pipeline, self.stereo = create_pipeline()
-        self.device_ip = device_ip
-        # 方形检测区域的大小
-        self.delta = 2
-        self.text_helper = TextHelper()
+def run():
+    global ref_pt, click_roi, calculation_algorithm, config
+    # 连接到设备并启动流水线
+    with dai.Device(dai.DeviceInfo("169.254.1.222")) as device:
+        # 创建设备流水线和最大视差
+        pipeline, maxDisparity = create_pipeline()
+        device.startPipeline(pipeline)
 
-    def process_detection(self, detection, depthData, hostSpatials, monoLeftFrame):
-        x1, y1, x2, y2, conf, cls = detection
-        x = int((x1 + x2) / 2)
-        y = int((y1 + y2) / 2)
+        # 初始化RGB和深度图像帧、深度数据、检测结果
+        frameRgb = None
+        frameDisp = None
+        detections = []
+        new_config = False  # 是否需要新的配置
 
-        # 从深度帧计算空间坐标
-        spatials, centroid = hostSpatials.calc_spatials(depthData, (x, y))
+        # 获取输入和输出队列
+        spatialCalcConfigInQueue = device.getInputQueue("spatialCalcConfig")
+        imageQueue = device.getOutputQueue("image")
+        dispQueue = device.getOutputQueue("disp")
+        detectQueue = device.getOutputQueue(name="detections")
 
-        # 在单目相机的帧上绘制矩形框和空间坐标信息
-        self.text_helper.rectangle(monoLeftFrame, (x - self.delta, y - self.delta), (x + self.delta, y + self.delta))
-        self.text_helper.putText(monoLeftFrame, "X: " + (
-            "{:.5f}m".format(spatials['x'] / 1000) if not math.isnan(spatials['x']) else "--"),
-                                 (x + 10, y + 20))
-        self.text_helper.putText(monoLeftFrame, "Y: " + (
-            "{:.5f}m".format(spatials['y'] / 1000) if not math.isnan(spatials['y']) else "--"),
-                                 (x + 10, y + 35))
-        self.text_helper.putText(monoLeftFrame, "Z: " + (
-            "{:.5f}m".format(spatials['z'] / 1000) if not math.isnan(spatials['z']) else "--"),
-                                 (x + 10, y + 50))
-        return monoLeftFrame
+        # 在帧上绘制检测结果
+        def draw_detection(frame, detections):
+            for detection in detections:
+                # 如果检测结果包含空间坐标，绘制X, Y, Z坐标
+                if hasattr(detection, "spatialCoordinates"):
+                    print(f"X: {int(detection.spatialCoordinates.x)} mm")
+                    print(f"Y: {int(detection.spatialCoordinates.y)} mm")
+                    print(f"Z: {int(detection.spatialCoordinates.z)} mm")
 
-    def start_device(self):
-        while True:
-            try:
-                # 连接到设备并启动管道
-                with dai.Device(self.pipeline, dai.DeviceInfo(self.device_ip)) as device:
-                    depthQueue = device.getOutputQueue(name="depth")
-                    monoLeftQueue = device.getOutputQueue(name="mono_left")
+        # 主循环，检查设备是否关闭
+        while not device.isClosed():
+            # 尝试获取图像、深度、空间数据和检测数据
+            imageData = imageQueue.tryGet()
+            dispData = dispQueue.tryGet()
+            detData = detectQueue.tryGet()
 
-                    hostSpatials = HostSpatialsCalc(device)
-                    hostSpatials.setDeltaRoi(self.delta)
+            # 如果有检测数据，处理帧率和检测结果
+            if detData is not None:
+                detections = detData.detections
 
-                    while True:
-                        depthData = depthQueue.get()
-                        monoLeftData = monoLeftQueue.get()
+            # 如果有图像数据，绘制检测和空间位置，显示帧率
+            if imageData is not None:
+                frameRgb = imageData.getCvFrame()
+                draw_detection(frameRgb, detections)
 
-                        # 获取左单目相机帧并转换为彩色图像
-                        monoLeftFrame = monoLeftData.getCvFrame()
-                        monoLeftFrame = cv2.cvtColor(monoLeftFrame, cv2.COLOR_GRAY2BGR)  # 转换为三通道图像
+            # 如果有深度数据，绘制检测和空间位置，显示帧率
+            if dispData is not None:
+                frameDisp = dispData.getFrame()
+                frameDisp = (frameDisp * (255 / maxDisparity)).astype(np.uint8)  # 深度数据归一化
+                frameDisp = cv2.applyColorMap(frameDisp, cv2.COLORMAP_JET)  # 应用颜色映射
+                frameDisp = np.ascontiguousarray(frameDisp)
+                draw_detection(frameDisp, detections)
 
-                        # YOLOv8 推理
-                        results = self.model(monoLeftFrame)[0]  # 获取推理结果
+            # 当RGB和深度图像都收到时，检查用户输入的ROI
+            if frameRgb is not None and frameDisp is not None and click_roi is not None:
+                # 获取ROI的上下左右坐标
+                (
+                    [top_left.x, top_left.y],
+                    [bottom_right.x, bottom_right.y],
+                ) = check_input(click_roi, frameRgb)
+                click_roi = None  # 清除ROI
+                new_config = True  # 设定需要新的配置
 
-                        # 提取检测结果
-                        detections = results.boxes.data.cpu().numpy()  # 提取检测框数据
-
-                        # 使用多线程处理每个检测结果
-                        with concurrent.futures.ThreadPoolExecutor() as executor:
-                            futures = [
-                                executor.submit(self.process_detection, detection, depthData, hostSpatials, monoLeftFrame)
-                                for detection in detections]
-                            for future in concurrent.futures.as_completed(futures):
-                                monoLeftFrame = future.result()
-
-                        # 显示推理结果
-                        cv2.imshow("mono-left-depth", monoLeftFrame)
-
-                        key = cv2.waitKey(1)
-                        if key == ord('q'):
-                            return
-
-            except Exception as e:
-                print(f"设备连接失败: {e}")
-                print("5秒后重试...")
-                time.sleep(5)
+            # 如果有新的配置，则发送新的ROI和计算算法配置
+            if new_config:
+                config.roi = dai.Rect(top_left, bottom_right)
+                config.calculationAlgorithm = calculation_algorithm
+                cfg = dai.SpatialLocationCalculatorConfig()
+                cfg.addROI(config)
+                spatialCalcConfigInQueue.send(cfg)  # 发送新的空间计算配置
+                new_config = False  # 配置发送完成，重置标志
 
 
 if __name__ == "__main__":
-    model_file_path = r'C:\dataSet\result\weights\bestHead.pt'
-    device_ip_address = "169.254.1.222"
-    app = DepthAIApp(model_file_path, device_ip_address)
-    app.start_device()
+    ref_pt = None
+    click_roi = None
+    run()
