@@ -15,9 +15,9 @@ FPS = 15
 lower_threshold = 0  # mm
 upper_threshold = 100_000  # mm
 
-num_classes = 80
+num_classes = 1
 
-blob = Path(__file__).parent.joinpath("yolov8n_openvino_2021.4_6shave.blob")
+blob = Path(__file__).parent.joinpath("bestHead_openvino_2022.1_6shave.blob")
 model = dai.OpenVINO.Blob(blob)
 dim = next(iter(model.networkInputs.values())).dims
 W, H = dim[:2]
@@ -27,18 +27,7 @@ num_classes = output_tenser.dims[2] - 5 if "yolov6" in output_name else output_t
 
 # fmt: off
 label_map = [
-    "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train",
-    "truck", "boat", "traffic light", "fire hydrant", "stop sign", "parking meter", "bench",
-    "bird", "cat", "dog", "horse", "sheep", "cow", "elephant",
-    "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie",
-    "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat",
-    "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup",
-    "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich",
-    "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake",
-    "chair", "sofa", "pottedplant", "bed", "diningtable", "toilet", "tvmonitor",
-    "laptop", "mouse", "remote", "keyboard", "cell phone", "microwave", "oven",
-    "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
-    "teddy bear", "hair drier", "toothbrush"
+    "head"
 ]
 # fmt: on
 

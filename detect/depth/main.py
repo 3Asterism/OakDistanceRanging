@@ -6,8 +6,8 @@ import cv2
 import depthai as dai
 import numpy as np
 
-lower_threshold = 0  # 最小深度阈值，单位为毫米
-upper_threshold = 100_000  # 最大深度阈值，单位为毫米
+lower_threshold = 30  # 最小深度阈值，单位为毫米
+upper_threshold = 150_0  # 最大深度阈值，单位为毫米
 
 num_classes = 1  # 类别数量
 
@@ -162,7 +162,7 @@ def run():
         def draw_detection(frame, detections):
             for detection in detections:
                 # 如果检测结果包含空间坐标，绘制X, Y, Z坐标
-                if hasattr(detection, "spatialCoordinates"):
+                if hasattr(detection, "spatialCoordinates") and int(detection.spatialCoordinates.z) > 30:
                     print(f"X: {int(detection.spatialCoordinates.x)} mm")
                     print(f"Y: {int(detection.spatialCoordinates.y)} mm")
                     print(f"Z: {int(detection.spatialCoordinates.z)} mm")
