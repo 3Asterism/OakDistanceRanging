@@ -19,15 +19,11 @@ W, H = dim[:2]  # 获取宽度和高度
 
 # 获取输出名称和张量
 output_name, output_tenser = next(iter(model.networkOutputs.items()))
-# 根据模型类型确定类别数量
-num_classes = output_tenser.dims[2] - 5 if "yolov6" in output_name else output_tenser.dims[2] // 3 - 5
 
 # 标签映射
-# fmt: off
 label_map = [
     "head"
 ]
-# fmt: on
 
 # 最小深度设置，视差范围加倍（从95到190）：
 extended_disparity = True
@@ -128,7 +124,6 @@ def create_pipeline():
     spatialLocationCalculator.initialConfig.addROI(config)  # 添加感兴趣区域配置
 
     # 链接各个节点
-    # right.isp.link(imageOut.input)  # 连接右摄像头的ISP与图像输出
     stereo.syncedRight.link(imageOut.input)  # 连接同步右摄像头的深度输出与图像输出
     manip.out.link(spatialDetectionNetwork.input)  # 连接图像处理输出与YOLO输入
 
@@ -145,25 +140,6 @@ def create_pipeline():
 
     return pipeline, stereo.initialConfig.getMaxDisparity()  # 返回管道和最大视差值
 
-
-def check_input(roi, frame, DELTA=5):
-    """检查输入是否为ROI或点。如果是点，则转换为ROI"""
-    # 如果输入是列表，则转换为numpy数组
-    if isinstance(roi, list):
-        roi = np.array(roi)
-
-    # 限制点的范围，以免ROI超出帧范围
-    if roi.shape in {(2,), (2, 1)}:  # 如果是点
-        roi = np.hstack([roi, np.array([[-DELTA, -DELTA], [DELTA, DELTA]])])  # 扩展为ROI
-    elif roi.shape in {(4,), (4, 1)}:  # 如果是四个坐标
-        roi = np.array(roi)
-
-    # 将ROI限制在帧的范围内
-    roi.clip([DELTA, DELTA], [frame.shape[1] - DELTA, frame.shape[0] - DELTA])
-
-    return roi / frame.shape[1::-1]  # 返回归一化后的ROI
-
-
 def run():
     global ref_pt, click_roi, calculation_algorithm, config
     # 连接到设备并启动流水线
@@ -176,10 +152,8 @@ def run():
         frameRgb = None
         frameDisp = None
         detections = []
-        new_config = False  # 是否需要新的配置
 
         # 获取输入和输出队列
-        spatialCalcConfigInQueue = device.getInputQueue("spatialCalcConfig")
         imageQueue = device.getOutputQueue("image")
         dispQueue = device.getOutputQueue("disp")
         detectQueue = device.getOutputQueue(name="detections")
@@ -216,25 +190,6 @@ def run():
                 frameDisp = cv2.applyColorMap(frameDisp, cv2.COLORMAP_JET)  # 应用颜色映射
                 frameDisp = np.ascontiguousarray(frameDisp)
                 draw_detection(frameDisp, detections)
-
-            # 当RGB和深度图像都收到时，检查用户输入的ROI
-            if frameRgb is not None and frameDisp is not None and click_roi is not None:
-                # 获取ROI的上下左右坐标
-                (
-                    [top_left.x, top_left.y],
-                    [bottom_right.x, bottom_right.y],
-                ) = check_input(click_roi, frameRgb)
-                click_roi = None  # 清除ROI
-                new_config = True  # 设定需要新的配置
-
-            # 如果有新的配置，则发送新的ROI和计算算法配置
-            if new_config:
-                config.roi = dai.Rect(top_left, bottom_right)
-                config.calculationAlgorithm = calculation_algorithm
-                cfg = dai.SpatialLocationCalculatorConfig()
-                cfg.addROI(config)
-                spatialCalcConfigInQueue.send(cfg)  # 发送新的空间计算配置
-                new_config = False  # 配置发送完成，重置标志
 
 
 if __name__ == "__main__":
