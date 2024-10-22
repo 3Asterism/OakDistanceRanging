@@ -12,7 +12,7 @@ upper_threshold = 150_0  # 最大深度阈值，单位为毫米
 num_classes = 1  # 类别数量
 
 # 加载模型文件
-blob = Path(__file__).parent.joinpath("bestHead_openvino_2022.1_6shave.blob")
+blob = Path(__file__).parent.parent.joinpath("model/best_openvino_2022.1_5shave.blob")
 model = dai.OpenVINO.Blob(blob)  # 创建OpenVINO模型对象
 dim = next(iter(model.networkInputs.values())).dims  # 获取输入维度
 W, H = dim[:2]  # 获取宽度和高度
