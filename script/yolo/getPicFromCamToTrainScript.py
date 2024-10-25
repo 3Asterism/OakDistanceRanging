@@ -10,8 +10,8 @@ pipeline = dai.Pipeline()
 
 # 定义RGB摄像头
 camRgb = pipeline.createColorCamera()
-camRgb.setBoardSocket(dai.CameraBoardSocket.RIGHT)
-camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_12_MP)
+camRgb.setBoardSocket(dai.CameraBoardSocket.LEFT)
+camRgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_800_P)
 camRgb.setInterleaved(False)
 camRgb.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
 
@@ -26,7 +26,7 @@ with dai.Device(pipeline, dai.DeviceInfo("169.254.1.222")) as device:
     videoQueue = device.getOutputQueue(name="video", maxSize=1, blocking=False)
 
     # 创建存储截图的文件夹
-    save_path = r"C:\dataSet\pic\noOrder"
+    save_path = r"C:\dataSet\keypoint\valPic"
     os.makedirs(save_path, exist_ok=True)
 
     while True:

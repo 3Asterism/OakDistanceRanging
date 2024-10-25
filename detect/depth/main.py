@@ -5,6 +5,7 @@ from pathlib import Path
 import cv2
 import depthai as dai
 import numpy as np
+import math
 
 lower_threshold = 30  # 最小深度阈值，单位为毫米
 upper_threshold = 150_0  # 最大深度阈值，单位为毫米
@@ -37,6 +38,33 @@ calculation_algorithm = dai.SpatialLocationCalculatorAlgorithm.AVERAGE
 top_left = dai.Point2f(0.4, 0.4)  # 定义矩形计算区域的左上角
 bottom_right = dai.Point2f(0.6, 0.6)  # 定义矩形计算区域的右下角
 config = dai.SpatialLocationCalculatorConfigData()  # 创建空间位置计算配置对象
+
+
+def angle_CBD_complement(B, C, D):
+    # 假设检测框是左上角为A 顺时针顶点为A B D C的矩形
+    #     A             B
+    #      +-----------+
+    #      |        /  |
+    #      |      /    |
+    #      |    /      |
+    #      |   /       |
+    #      +-----------+
+    #     C             D
+    # 矩形左上角和右下角坐标 计算向量
+
+    v1 = (C[0] - B[0], C[1] - B[1])  # BC
+    v2 = (D[0] - B[0], D[1] - B[1])  # BD
+
+    dot_product = v1[0] * v2[0] + v1[1] * v2[1]
+    magnitude_v1 = math.sqrt(v1[0] ** 2 + v1[1] ** 2)
+    magnitude_v2 = math.sqrt(v2[0] ** 2 + v2[1] ** 2)
+
+    cos_angle = dot_product / (magnitude_v1 * magnitude_v2)
+    angle = math.acos(cos_angle)
+
+    # 计算余角
+    complement_angle = 90 - math.degrees(angle)
+    return complement_angle
 
 
 def create_pipeline():
@@ -140,10 +168,18 @@ def create_pipeline():
 
     return pipeline, stereo.initialConfig.getMaxDisparity()  # 返回管道和最大视差值
 
+
 def run():
     global ref_pt, click_roi, calculation_algorithm, config
     # 连接到设备并启动流水线
     with dai.Device(dai.DeviceInfo("169.254.1.222")) as device:
+        # 归一化边界框
+        def frame_norm(frame, bbox):
+            """NN 数据作为边界框位置，位于 <0..1> 范围内它们需要用帧宽度/高度进行归一化"""
+            normVals = np.full(len(bbox), frame.shape[0])  # 用帧的高度填充数组
+            normVals[::2] = frame.shape[1]  # 每隔一项使用帧的宽度
+            return (np.clip(np.array(bbox), 0, 1) * normVals).astype(int)  # 归一化并转换为整数
+
         # 创建设备流水线和最大视差
         pipeline, maxDisparity = create_pipeline()
         device.startPipeline(pipeline)
@@ -161,12 +197,22 @@ def run():
         # 在帧上绘制检测结果
         def draw_detection(frame, detections):
             for detection in detections:
+                # 归一化边界框，转换为帧尺寸
+                bbox = frame_norm(
+                    frame,
+                    (detection.xmin, detection.ymin, detection.xmax, detection.ymax),
+                )
+                # 点坐标
+                point_B = (bbox[2], bbox[1])  # 右上角
+                point_C = (bbox[2], bbox[3])  # 右下角
+                point_D = (bbox[0], bbox[3])  # 左下角
+                angle_R = angle_CBD_complement(point_B, point_C, point_D)
                 # 如果检测结果包含空间坐标，绘制X, Y, Z坐标
                 if hasattr(detection, "spatialCoordinates") and int(detection.spatialCoordinates.z) > 30:
                     print(f"X: {int(detection.spatialCoordinates.x)} mm")
                     print(f"Y: {int(detection.spatialCoordinates.y)} mm")
                     print(f"Z: {int(detection.spatialCoordinates.z)} mm")
-
+                    print(f"R: {int(angle_R)} degrees")
         # 主循环，检查设备是否关闭
         while not device.isClosed():
             # 尝试获取图像、深度、空间数据和检测数据

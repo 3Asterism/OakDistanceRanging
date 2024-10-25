@@ -6,11 +6,11 @@ import shutil
 
 # 框的类别
 bbox_class = {
-    'sjb_rect': 0
+    'head': 0
 }
 
 # 关键点的类别
-keypoint_class = ['angle_30', 'angle_60', 'angle_90']  # 这里类别放的顺序对应关键点类别的标签 0，1，2
+keypoint_class = ['top']  # 这里类别放的顺序对应关键点类别的标签 0，1，2
 
 
 def process_single_json(labelme_path, save_folder):
@@ -87,8 +87,8 @@ def main():
     os.makedirs(train_dir, exist_ok=True)
     os.makedirs(val_dir, exist_ok=True)
 
-    train_json_dir = os.path.join(Dataset_root, 'label_json', 'train')
-    val_json_dir = os.path.join(Dataset_root, 'label_json', 'val')
+    train_json_dir = os.path.join(Dataset_root, 'train')
+    val_json_dir = os.path.join(Dataset_root, 'val')
 
     for json_dir, save_folder in [(train_json_dir, train_dir), (val_json_dir, val_dir)]:
         if not os.path.exists(json_dir):
