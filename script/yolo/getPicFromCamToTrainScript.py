@@ -21,11 +21,12 @@ xoutVideo.setStreamName("video")
 camRgb.video.link(xoutVideo.input)
 
 # 连接到设备并启动Pipeline
-with dai.Device(pipeline, dai.DeviceInfo("169.254.1.222")) as device:
+with dai.Device(pipeline, dai.DeviceInfo("10.40.4.1")) as device:
     # 获取视频输出队列
     videoQueue = device.getOutputQueue(name="video", maxSize=1, blocking=False)
 
     # 创建存储截图的文件夹
+    # save_path = r"C:\dataSet\keypoint\valPic"
     save_path = r"C:\dataSet\keypoint\valPic"
     os.makedirs(save_path, exist_ok=True)
 

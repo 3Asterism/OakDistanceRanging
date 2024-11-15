@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 import collections
+import math
 import time
 from pathlib import Path
 
 import cv2
 import depthai as dai
 import numpy as np
-import math
 
 lower_threshold = 0  # 最小深度阈值，单位为毫米
 upper_threshold = 100_000  # 最大深度阈值，单位为毫米
 
-num_classes = 1  # 类别数量
+num_classes = 1 # 类别数量
 
 # 加载模型文件
 blob = Path(__file__).parent.parent.joinpath("detect/model/best_openvino_2022.1_5shave.blob")
@@ -347,7 +347,7 @@ def click_and_crop(event, x, y, flags, param):
 def run():
     global ref_pt, click_roi, calculation_algorithm, config
     # 连接到设备并启动流水线
-    with dai.Device(dai.DeviceInfo("10.40.12.75")) as device:
+    with dai.Device(dai.DeviceInfo("10.40.4.1")) as device:
         # 创建设备流水线和最大视差
         pipeline, maxDisparity = create_pipeline()
         device.startPipeline(pipeline)
@@ -420,11 +420,12 @@ def run():
                 )
                 # 绘制检测框
                 draw_rect(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), bboxColors[detection.label], 1)
-                # 点坐标
-                point_B = (bbox[2], bbox[1])  # 右上角
-                point_C = (bbox[2], bbox[3])  # 右下角
-                point_D = (bbox[0], bbox[3])  # 左下角
-                angle_R = angle_CBD_complement(point_B, point_C, point_D)
+                # 绘制关键点
+                if hasattr(detection, 'keypoints') and detection.keypoints:
+                    for kp in detection.keypoints:
+                        x, y = int(kp[0]), int(kp[1])
+                        cv2.circle(frame, (x, y), 3, (0, 255, 0), -1)  # 绘制绿色圆点表示关键点
+
                 # 如果检测结果包含空间坐标，绘制X, Y, Z坐标
                 if hasattr(detection, "spatialCoordinates"):
                     print(f"X: {int(detection.spatialCoordinates.x)} mm")
@@ -445,12 +446,6 @@ def run():
                         f"Z: {int(detection.spatialCoordinates.z)} mm",  # Z坐标
                         (bbox[0] + 10, bbox[1] + 80),
                     )
-                    draw_text(
-                        frame,
-                        f"R: {int(angle_R)} degrees",  # R 角
-                        (bbox[0] + 10, bbox[1] + 95),
-                    )
-                    print(f"R: {int(angle_R)} degrees")
 
         # 定义绘制空间位置的函数
         def draw_spatial_locations(frame, spatialLocations):

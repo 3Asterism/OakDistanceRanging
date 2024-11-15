@@ -11,15 +11,15 @@ txt_folder = input("Enter the path to the folder to save TXT files: ").replace('
 os.makedirs(txt_folder, exist_ok=True)
 
 # 标签映射字典，将标签映射为整数
-label_map = {
-    "empty": 0,
-    "full": 1,
-    # 添加其他标签映射
-}
-
 # label_map = {
-#     "head": 0,
+#     "empty": 0,
+#     "full": 1,
+#     # 添加其他标签映射
 # }
+
+label_map = {
+    "key": 0,
+}
 
 # 获取所有JSON文件
 json_files = [f for f in os.listdir(json_folder) if f.endswith('.json')]
