@@ -84,8 +84,8 @@ def convert_labelme_to_yolo(labelme_dir, output_dir, image_width, image_height):
 
 
 # 使用示例
-labelme_dir = 'C:/dataSet/keypoint/valLabel'  # Labelme JSON 文件所在目录
-output_dir = 'C:/dataSet/keypoint/valTxt'  # 输出目录
+labelme_dir = 'C:/dataSet/box/label'  # Labelme JSON 文件所在目录
+output_dir = 'C:/dataSet/box/txt'  # 输出目录
 image_width, image_height = 1280, 800  # 图像宽高
 
 convert_labelme_to_yolo(labelme_dir, output_dir, image_width, image_height)

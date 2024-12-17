@@ -18,7 +18,7 @@ os.makedirs(txt_folder, exist_ok=True)
 # }
 
 label_map = {
-    "key": 0,
+    "cali": 0,
 }
 
 # 获取所有JSON文件
