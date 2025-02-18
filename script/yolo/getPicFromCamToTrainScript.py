@@ -27,7 +27,7 @@ with dai.Device(pipeline, dai.DeviceInfo("10.40.4.1")) as device:
 
     # 创建存储截图的文件夹
     # save_path = r"C:\dataSet\keypoint\valPic"
-    save_path = r"C:\dataSet\calibration\valPic"
+    save_path = r"C:\dataSet\autoTest\valPic"
     os.makedirs(save_path, exist_ok=True)
 
     while True:

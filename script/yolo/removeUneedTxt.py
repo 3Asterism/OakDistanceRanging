@@ -13,16 +13,16 @@ def clean_unpaired_files(pic_path, txt_path):
     # 获取所有jpg文件的文件名（不含扩展名）
     jpg_files = set()
     for file in os.listdir(pic_path):
-        if file.endswith('.jpg'):
+        if file.endswith('.txt'):
             jpg_files.add(os.path.splitext(file)[0])
 
     # 检查所有txt文件
     removed_count = 0
     for file in os.listdir(txt_path):
-        if file.endswith('.txt'):
+        if file.endswith('.json'):
             file_name = os.path.splitext(file)[0]
             # 如果txt文件没有对应的jpg文件
-            if file_name not in jpg_files:
+            if file_name in jpg_files:
                 file_path = os.path.join(txt_path, file)
                 try:
                     # 删除文件
@@ -37,8 +37,8 @@ def clean_unpaired_files(pic_path, txt_path):
 
 # 使用示例
 if __name__ == "__main__":
-    pic_folder = r"C:\dataSet\keypoint\pic"
-    txt_folder = r"C:\dataSet\keypoint\label"
+    pic_folder = r"C:\dataSet\box\valTxt"
+    txt_folder = r"C:\dataSet\box\valLabel"
 
     # 确保路径存在
     if not os.path.exists(pic_folder):

@@ -10,6 +10,7 @@ from pathlib import Path
 import cv2
 import depthai as dai
 import numpy as np
+from ultralytics import YOLO
 
 lower_threshold = 0  # 最小深度阈值，单位为毫米
 upper_threshold = 100_000  # 最大深度阈值，单位为毫米
@@ -233,6 +234,8 @@ def create_pipeline():
     stereo.setExtendedDisparity(extended_disparity)  # 设置扩展视差
     stereo.setSubpixel(subpixel)  # 设置子像素
     stereo.setOutputSize(right.getIspWidth(), right.getIspHeight())  # 设置输出大小
+    print(right.getIspWidth())
+    print(right.getIspHeight())
     stereo.setDepthAlign(right.getBoardSocket())  # 设置深度对齐
     print(f"Depth aligner: {right.getBoardSocket()}")  # 打印深度对齐信息
 
@@ -310,6 +313,46 @@ def angle_CBD_complement(B, C, D):
     complement_angle = 90 - math.degrees(angle)
     return complement_angle
 
+
+def process_frame(frame):
+    """
+    处理输入的图像帧，使用YOLO进行物体检测并计算每个物体的中心点。
+    返回：处理后的图像（frame），每个物体的中心点坐标
+    """
+    # 使用YOLO模型进行预测
+    # 加载YOLOv11模型
+    modelYOLO = YOLO("bestCali.pt")
+    results = modelYOLO(frame)
+
+    center_points = []  # 用于存储每个物体的中心点坐标
+
+    # 处理每个检测结果
+    for r in results:
+        if r.boxes is not None:
+            boxes_data = r.boxes.data
+
+            for obj_idx, box in enumerate(boxes_data):
+                # 获取边界框坐标
+                x1, y1, x2, y2 = map(int, box[:4])
+                conf = float(box[4])
+
+                # 计算边界框的中心点
+                center_x = (x1 + x2) / 2
+                center_y = (y1 + y2) / 2
+                center_points.append((int(center_x), int(center_y)))
+
+                # 在图像上绘制边界框
+                cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 0), 2)
+
+                # 在边界框上方绘制标签
+                label = f"#{obj_idx + 1} ({conf:.2f})"
+                cv2.putText(frame, label, (x1, y1 - 10),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 1)
+
+                # 在中心点位置绘制圆形
+                cv2.circle(frame, (int(center_x), int(center_y)), 5, (0, 255, 0), -1)
+
+    return frame, center_points
 
 def check_input(roi, frame, DELTA=5):
     """检查输入是否为ROI或点。如果是点，则转换为ROI"""
@@ -492,13 +535,19 @@ def run():
             # 如果有图像数据，绘制检测和空间位置，显示帧率
             if imageData is not None:
                 frameRgb = imageData.getCvFrame()
+
                 draw_detection(frameRgb, detections)
                 draw_spatial_locations(frameRgb, depthDatas)
                 fps.tick("image")
                 fps.drawFps(frameRgb, "image")
+                # 调用处理函数
+                frameRgb, center_points = process_frame(frameRgb)
 
+                # 显示结果
+                cv2.imshow("YOLOv11 Detection with Centers", frameRgb)
+                print("Detected center points:", center_points)
                 # 显示RGB图像
-                cv2.imshow(rgbWindowName, frameRgb)
+                # cv2.imshow(rgbWindowName, frameRgb)
 
             # 如果有深度数据，绘制检测和空间位置，显示帧率
             if dispData is not None:

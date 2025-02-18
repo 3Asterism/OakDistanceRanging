@@ -16,22 +16,27 @@ def calculate_center(box_points):
 
 
 # 加载YOLOv11模型
-model = YOLO("bestCali.pt")
+model = YOLO("bestBox.pt")
 
 # 创建 DepthAI 管道
 pipeline = dai.Pipeline()
 
-# 设置摄像头节点
+# 设置摄像头节点，保持原始分辨率 (1280x800)
 cam_rgb = pipeline.create(dai.node.ColorCamera)
-cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_800_P)
+cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_800_P)  # 设置为800P分辨率 (1280x800)
 cam_rgb.setFps(30)
-cam_rgb.setIspScale(1, 2)
 cam_rgb.setBoardSocket(dai.CameraBoardSocket.CAM_B)
+
+# 创建图像处理节点 (ImageManip)，调整输出分辨率为 1280x800
+manip = pipeline.create(dai.node.ImageManip)
+manip.setMaxOutputFrameSize(3072000)  # 设置最大输出帧大小为3MB
+manip.setResize(1200,800)
+cam_rgb.preview.link(manip.inputImage)  # 连接摄像头和图像处理节点
 
 # 设置输出节点
 xout_rgb = pipeline.create(dai.node.XLinkOut)
 xout_rgb.setStreamName("rgb")
-cam_rgb.preview.link(xout_rgb.input)
+manip.out.link(xout_rgb.input)  # 连接图像处理输出到 XLinkOut
 
 # 连接到设备并开始管道
 with dai.Device(pipeline, dai.DeviceInfo("10.40.4.1")) as device:
